@@ -34,6 +34,7 @@ const SOURCES = {
 const FEDERALIST_PICKS = [1, 2, 6, 9, 10, 14, 15, 23, 39, 47, 48, 51, 62, 68, 70, 78, 84, 85];
 
 const ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
+const ORDINALS = ["", "First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const WORD_TO_NUM: Record<string, number> = {
   ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, SIX: 6, SEVEN: 7,
 };
@@ -166,8 +167,12 @@ function parseBillOfRights(raw: string): Passage[] {
   const out: Passage[] = [];
   for (let i = 1; i < parts.length; i += 2) {
     const roman = parts[i];
-    const text = paragraphs(parts[i + 1] ?? "").join(" ");
-    if (!text) continue;
+    const body = paragraphs(parts[i + 1] ?? "").join(" ");
+    if (!body) continue;
+    const ord = ORDINALS[ROMAN.indexOf(roman)] ?? roman;
+    // Lead with the ordinal name so common phrasing ("the First Amendment")
+    // matches in both lexical and dense retrieval; the roman numeral alone does not.
+    const text = `The ${ord} Amendment (Amendment ${roman}) to the U.S. Constitution. ${body}`;
     out.push({
       id: `bor-am-${roman}`,
       book: "U.S. Constitution",
