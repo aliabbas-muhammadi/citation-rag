@@ -63,6 +63,7 @@ export type StreamEvent =
 export async function* streamAnswer(
   question: string,
   sources: Passage[],
+  signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   if (sources.length === 0) {
     yield { type: "done", abstained: true, model: "none" };
@@ -74,14 +75,17 @@ export async function* streamAnswer(
   }
 
   const client = new Anthropic();
-  const stream = client.messages.stream({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system: SYSTEM_PROMPT,
-    // Latency note: thinking is omitted for a snappy first token. Enable
-    // `thinking: { type: "adaptive" }` for harder, multi-hop questions.
-    messages: [{ role: "user", content: buildContent(question, sources) }],
-  });
+  const stream = client.messages.stream(
+    {
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      // Latency note: thinking is omitted for a snappy first token. Enable
+      // `thinking: { type: "adaptive" }` for harder, multi-hop questions.
+      messages: [{ role: "user", content: buildContent(question, sources) }],
+    },
+    { signal },
+  );
 
   let fullText = "";
   let gateOpen = false; // becomes true once we know it isn't an abstain
@@ -121,7 +125,9 @@ export async function* streamAnswer(
           for (const e of tryGate()) yield e;
         }
       } else if (d.type === "citations_delta" && d.citation.type === "char_location") {
-        if (!gateOpen && !abstained) for (const e of tryGate()) yield e;
+        // A citation means it's a real answer (abstain emits no citations), so
+        // force the gate open even if the cited span is shorter than the sentinel.
+        if (!gateOpen && !abstained) for (const e of tryGate(true)) yield e;
         if (gateOpen) {
           const c = mapCitation(d.citation, sources);
           if (c) yield { type: "citation", citation: c };
