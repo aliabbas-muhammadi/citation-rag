@@ -1,116 +1,90 @@
-import sampleCorpus from "@/data/sample-corpus.json";
+import corpusData from "@/data/corpus.json";
 import type { Passage, RetrievedChunk } from "./types";
+import { BM25, type Ranked } from "./bm25";
+import { embedQuery, denseRank, hasEmbeddingIndex } from "./embeddings";
+import { reciprocalRankFusion } from "./rrf";
 
-/** A pluggable source of passages. Swap the mock for a real DB in production. */
+/** A pluggable source of passages. Swap the in-process index for a real DB in production. */
 export interface Corpus {
   search(query: string, k: number): Promise<RetrievedChunk[]>;
 }
 
-/* --------------------------------------------------------------------------
-   Text normalization — diacritic-insensitive, with light Arabic folding.
-   This mirrors the normalize_arabic() approach used in Shia Library so the
-   mock retriever behaves like the real corpus on Arabic/transliterated input.
-   -------------------------------------------------------------------------- */
-function normalizeArabic(s: string): string {
-  return s
-    .replace(/[ً-ٰٟ]/g, "") // harakat (short vowels)
-    .replace(/ـ/g, "") // tatweel (elongation)
-    .replace(/[آأإ]/g, "ا") // alef variants -> bare alef
-    .replace(/ى/g, "ي"); // alef maqsura -> ya
-}
-
-function normalize(s: string): string {
-  return normalizeArabic(s.toLowerCase()).replace(/[^\p{L}\p{N}\s]/gu, " ");
-}
-
-const STOPWORDS = new Set(
-  ("a an and are as at be by do does for from has have how in into is it its of on or " +
-    "that the this to was were what when where which who why with you your").split(" "),
-);
-
-function tokenize(s: string): string[] {
-  return normalize(s)
-    .split(/\s+/)
-    .filter((t) => t.length > 1 && !STOPWORDS.has(t))
-    // naive plural folding, applied symmetrically to query and corpus
-    .map((t) => (t.length > 3 && t.endsWith("s") ? t.slice(0, -1) : t));
-}
+// Number of candidates each retriever contributes to fusion. Wider than k so a
+// passage ranked, say, #12 by BM25 but #2 by embeddings still surfaces.
+const CANDIDATES = 40;
 
 /**
- * In-memory corpus over a bundled sample, scored with a small TF-IDF + phrase
- * bonus. Zero external dependencies, so the demo and the eval harness run with
- * no database and no API key.
+ * Hybrid retrieval over the bundled, embedded corpus — no database required.
+ *
+ *   1. Lexical: BM25 over normalized tokens (exact terms, names, "Article I").
+ *   2. Dense:   cosine over precomputed OpenAI embeddings (paraphrase, concepts).
+ *   3. Fuse:    Reciprocal Rank Fusion of the two rankings, then take top-k.
+ *
+ * Dense retrieval needs a live query embedding (OPENAI_API_KEY); without it the
+ * engine degrades to BM25-only so the demo and eval still run with no keys. A
+ * cross-encoder re-rank over the fused top ~30 would slot in before the slice.
  */
-export class MockCorpus implements Corpus {
+export class InProcessCorpus implements Corpus {
   private passages: Passage[];
-  private df = new Map<string, number>();
+  private byId: Map<string, Passage>;
+  private bm25: BM25;
 
   constructor(passages?: Passage[]) {
-    this.passages = passages ?? (sampleCorpus as Passage[]);
-
-    for (const p of this.passages) {
-      const seen = new Set(tokenize(p.text));
-      for (const t of seen) this.df.set(t, (this.df.get(t) ?? 0) + 1);
-    }
-  }
-
-  private idf(term: string): number {
-    const n = this.passages.length;
-    const df = this.df.get(term) ?? 0;
-    return Math.log((n + 1) / (df + 0.5));
+    this.passages = passages ?? (corpusData as unknown as Passage[]);
+    this.byId = new Map(this.passages.map((p) => [p.id, p]));
+    this.bm25 = new BM25(this.passages.map((p) => ({ id: p.id, text: p.text })));
   }
 
   async search(query: string, k: number): Promise<RetrievedChunk[]> {
-    const qTokens = tokenize(query);
-    const qNorm = normalize(query).trim();
+    const lexical = this.bm25.search(query).slice(0, CANDIDATES);
 
-    const scored = this.passages.map((passage) => {
-      const pTokens = tokenize(passage.text);
-      const pSet = new Set(pTokens);
-      let score = 0;
-      for (const t of qTokens) if (pSet.has(t)) score += this.idf(t);
-      // length normalization so short passages aren't unfairly penalized
-      score = score / Math.sqrt(pTokens.length || 1);
-      // phrase bonus: reward an exact normalized substring match
-      if (qNorm.length > 0 && normalize(passage.text).includes(qNorm)) {
-        score += 2;
-      }
-      return { passage, score };
-    });
+    let dense: Ranked[] = [];
+    if (hasEmbeddingIndex()) {
+      const qVec = await embedQuery(query);
+      if (qVec) dense = denseRank(qVec).slice(0, CANDIDATES);
+    }
 
-    return scored
-      .filter((c) => c.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, k);
+    // Fuse when both signals exist; otherwise use whichever we have.
+    const fused =
+      dense.length > 0 ? reciprocalRankFusion([lexical, dense]) : lexical;
+
+    return fused
+      .slice(0, k)
+      .map(({ id, score }) => ({ passage: this.byId.get(id)!, score }))
+      .filter((c) => c.passage);
   }
 }
 
 /**
  * Production adapter over the real corpus (Supabase/Postgres + pgvector).
  *
- * Intended implementation (hybrid retrieval):
+ * Intended implementation (hybrid retrieval against the live DB):
  *   1. Lexical: full-text search over the English column AND a
- *      normalize_arabic()-indexed Arabic column (GIN trigram) — exact terms,
- *      names, and citation numbers.
- *   2. Dense: embed the query (OpenAI/Voyage), then pgvector
- *      `ORDER BY embedding <=> $queryEmbedding LIMIT k`.
- *   3. Fuse the two result sets with Reciprocal Rank Fusion, then (optionally)
- *      re-rank the top ~30 with a cross-encoder before taking the top k.
+ *      normalize_arabic()-indexed Arabic column — exact terms, names, numbers.
+ *   2. Dense: embed the query, then pgvector `ORDER BY embedding <=> $vec LIMIT k`.
+ *   3. Fuse with Reciprocal Rank Fusion (the same rrf.ts), then optionally
+ *      re-rank the top ~30 with a cross-encoder before taking k.
  *
- * Left as a stub on purpose — wire it to your DB when you move off the sample.
+ * Left as a stub on purpose — this is the Phase-2 "Ask" path over the real
+ * Shia Library corpus. Set CORPUS_BACKEND=supabase once it's wired up.
  */
 export class SupabaseCorpus implements Corpus {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async search(_query: string, _k: number): Promise<RetrievedChunk[]> {
     throw new Error(
       "SupabaseCorpus is not configured. Implement hybrid retrieval against your " +
-        "Postgres/pgvector corpus, or set CORPUS_BACKEND=mock to use the sample.",
+        "Postgres/pgvector corpus, or set CORPUS_BACKEND=mock to use the bundled corpus.",
     );
   }
 }
 
+let cached: Corpus | null = null;
+
 export function getCorpus(): Corpus {
-  return process.env.CORPUS_BACKEND === "supabase"
-    ? new SupabaseCorpus()
-    : new MockCorpus();
+  if (cached) return cached;
+  cached =
+    process.env.CORPUS_BACKEND === "supabase"
+      ? new SupabaseCorpus()
+      : new InProcessCorpus();
+  return cached;
 }
