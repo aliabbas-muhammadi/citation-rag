@@ -1,0 +1,9 @@
+[
+  { "question": "Why is the ocean salty?", "relevantPassageIds": ["p4"] },
+  { "question": "How does rain form?", "relevantPassageIds": ["p2", "p3"] },
+  { "question": "How does water get into the air?", "relevantPassageIds": ["p1"] },
+  { "question": "What is the average salinity of the ocean?", "relevantPassageIds": ["p5"] },
+  { "question": "What is an aquifer?", "relevantPassageIds": ["p7"] },
+  { "question": "How do springs form?", "relevantPassageIds": ["p8"] },
+  { "question": "How does a river shape the landscape?", "relevantPassageIds": ["p6"] }
+]
