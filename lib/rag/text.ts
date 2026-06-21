@@ -26,10 +26,27 @@ const STOPWORDS = new Set(
     .split(" "),
 );
 
+/**
+ * Light stemmer applied symmetrically to query and corpus, so morphological
+ * variants match (e.g. "amended" / "amendment" → "amend", "punishments" →
+ * "punish"). Conservative length guards and an -ss guard avoid mangling words
+ * like "congress" or "press".
+ */
+function stem(t: string): string {
+  // plural
+  if (t.length > 4 && t.endsWith("ies")) t = t.slice(0, -3) + "y";
+  else if (t.length > 4 && t.endsWith("es") && !t.endsWith("sses")) t = t.slice(0, -2);
+  else if (t.length > 3 && t.endsWith("s") && !t.endsWith("ss")) t = t.slice(0, -1);
+  // light derivational folding
+  if (t.length > 5 && t.endsWith("ment")) t = t.slice(0, -4);
+  if (t.length > 4 && t.endsWith("ing")) t = t.slice(0, -3);
+  else if (t.length > 4 && t.endsWith("ed")) t = t.slice(0, -2);
+  return t;
+}
+
 export function tokenize(s: string): string[] {
   return normalize(s)
     .split(/\s+/)
     .filter((t) => t.length > 1 && !STOPWORDS.has(t))
-    // naive plural folding, applied symmetrically to query and corpus
-    .map((t) => (t.length > 3 && t.endsWith("s") ? t.slice(0, -1) : t));
+    .map(stem);
 }
