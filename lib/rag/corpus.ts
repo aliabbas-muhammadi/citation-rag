@@ -2,7 +2,7 @@ import corpusData from "@/data/corpus.json";
 import type { Passage, RetrievedChunk } from "./types";
 import { BM25, type Ranked } from "./bm25";
 import { embedQuery, denseRank, hasEmbeddingIndex } from "./embeddings";
-import { reciprocalRankFusion } from "./rrf";
+import { reciprocalRankFusion, capPerSource } from "./rrf";
 
 /** A pluggable source of passages. Swap the in-process index for a real DB in production. */
 export interface Corpus {
@@ -12,6 +12,25 @@ export interface Corpus {
 // Number of candidates each retriever contributes to fusion. Wider than k so a
 // passage ranked, say, #12 by BM25 but #2 by embeddings still surfaces.
 const CANDIDATES = 40;
+
+/**
+ * The "source document" a passage belongs to, for diversity capping. The
+ * flooding unit here is a single Federalist essay (`section`, e.g. "No. 70
+ * (Hamilton)") — each contributes ~17 paragraph passages — so we key on
+ * book + section, not the (unique-per-row) citation number.
+ */
+export function sourceKey(p: Passage): string {
+  return `${p.book} :: ${p.section}`;
+}
+
+// Max passages from any one source document in the fused top-k (0 = off).
+// MEASURED OFF by default on this corpus: capping a flooding source helps only
+// when that source is *irrelevant* (the Shia Library's giant miracle book —
+// where a cap of 3 doubled grounding). Here the flooding source is usually the
+// *relevant* Federalist essay, so a cap of 3 lowered recall@5 0.91 → 0.86 (see
+// the `hybrid+sourcecap` arm in `npm run eval`). The mechanism stays, off,
+// behind an env flag — corpus-dependent, so it's measured, not assumed.
+const SOURCE_CAP = Number(process.env.SOURCE_CAP ?? "0");
 
 /**
  * Hybrid retrieval over the bundled, embedded corpus — no database required.
@@ -48,7 +67,18 @@ export class InProcessCorpus implements Corpus {
     const fused =
       dense.length > 0 ? reciprocalRankFusion([lexical, dense]) : lexical;
 
-    return fused
+    // Diversity cap before slicing: stop one source document (e.g. a single
+    // Federalist essay) from flooding the top-k and crowding out corroboration.
+    const ranked = capPerSource(
+      fused,
+      (id) => {
+        const p = this.byId.get(id);
+        return p ? sourceKey(p) : undefined;
+      },
+      SOURCE_CAP,
+    );
+
+    return ranked
       .slice(0, k)
       .map(({ id, score }) => ({ passage: this.byId.get(id)!, score }))
       .filter((c) => c.passage);

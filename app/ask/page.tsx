@@ -2,9 +2,11 @@
 
 import { useRef, useState } from "react";
 import type { Citation, Passage } from "@/lib/rag";
+import { CitationDialog } from "@/components/CitationDialog";
 
 type Segment = { text: string; citations: Citation[] };
 type Meta = { model?: string; usage?: { inputTokens: number; outputTokens: number } };
+type ActiveCitation = { passage: Passage; index: number; citedText: string };
 
 const EXAMPLES = [
   "What does the First Amendment protect?",
@@ -22,6 +24,8 @@ export default function AskPage() {
   const [abstained, setAbstained] = useState(false);
   const [meta, setMeta] = useState<Meta>({});
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [active, setActive] = useState<ActiveCitation | null>(null);
   const busy = useRef(false);
 
   async function run(q: string) {
@@ -35,6 +39,8 @@ export default function AskPage() {
     setSegments([]);
     setAbstained(false);
     setMeta({});
+    setSuggestions([]);
+    setActive(null);
 
     const segs: Segment[] = [];
     const flush = () =>
@@ -87,6 +93,9 @@ export default function AskPage() {
             case "done":
               setAbstained(ev.abstained);
               setMeta({ model: ev.model, usage: ev.usage });
+              break;
+            case "suggestions":
+              setSuggestions(Array.isArray(ev.suggestions) ? ev.suggestions : []);
               break;
             case "error":
               throw new Error(ev.message);
@@ -178,16 +187,41 @@ export default function AskPage() {
                   {segments.map((seg, i) => (
                     <span key={i}>
                       {seg.text}
-                      {seg.citations.map((c, j) => (
-                        <a
-                          key={`${i}-${j}`}
-                          href={`#source-${c.sourceIndex}`}
-                          title={c.citedText}
-                          className="mx-0.5 inline-flex translate-y-[-2px] items-center rounded bg-zinc-200 px-1 text-[0.65rem] font-medium text-zinc-700 no-underline dark:bg-zinc-700 dark:text-zinc-200"
-                        >
-                          {c.sourceIndex}
-                        </a>
-                      ))}
+                      {seg.citations.map((c, j) => {
+                        const p = sources[c.sourceIndex - 1];
+                        return (
+                          <span
+                            key={`${i}-${j}`}
+                            className="group/cite relative mx-0.5 inline-block align-middle"
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                p &&
+                                setActive({
+                                  passage: p,
+                                  index: c.sourceIndex,
+                                  citedText: c.citedText,
+                                })
+                              }
+                              aria-label={`View source ${c.sourceIndex} in context`}
+                              className="inline-flex translate-y-[-2px] items-center rounded bg-zinc-200 px-1 text-[0.65rem] font-medium text-zinc-700 hover:bg-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+                            >
+                              {c.sourceIndex}
+                            </button>
+                            {p && (
+                              <span className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1 hidden w-64 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-2.5 text-left text-xs opacity-0 shadow-lg transition-opacity group-hover/cite:opacity-100 group-focus-within/cite:opacity-100 dark:border-zinc-700 dark:bg-zinc-800 sm:block">
+                                <span className="block font-medium text-zinc-700 dark:text-zinc-200">
+                                  [{c.sourceIndex}] {p.book} — {p.section}
+                                </span>
+                                <span className="mt-1 line-clamp-3 block text-zinc-500 dark:text-zinc-400">
+                                  {c.citedText}
+                                </span>
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
                     </span>
                   ))}
                   {streaming && (
@@ -223,6 +257,29 @@ export default function AskPage() {
             </>
           )}
 
+          {suggestions.length > 0 && (
+            <div className="mt-8">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                Follow-up questions
+              </h2>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    disabled={streaming}
+                    onClick={() => {
+                      setQuestion(s);
+                      run(s);
+                    }}
+                    className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:border-zinc-500 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {meta.model && (
             <p className="mt-6 text-xs text-zinc-400">
               Model: {meta.model}
@@ -232,6 +289,15 @@ export default function AskPage() {
             </p>
           )}
         </section>
+      )}
+
+      {active && (
+        <CitationDialog
+          passage={active.passage}
+          index={active.index}
+          citedText={active.citedText}
+          onClose={() => setActive(null)}
+        />
       )}
     </main>
   );

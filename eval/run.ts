@@ -5,7 +5,13 @@
  *                                      # dense+hybrid when OPENAI_API_KEY is set)
  *   EVAL_REWRITE=1 npm run eval        # also measure LLM query rewriting (needs ANTHROPIC_API_KEY)
  *   EVAL_RERANK=1  npm run eval        # also measure LLM reranking of the fused top-N
+ *   EVAL_SOURCECAP=1 npm run eval      # also measure the per-source diversity cap arm (SOURCECAP_ARM, default 3)
  *   EVAL_FAITHFULNESS=1 npm run eval   # also score answer faithfulness + abstain accuracy
+ *
+ * Faithfulness is scored by TWO independent judges — Claude (headline) and
+ * gpt-4o-mini (secondary, needs OPENAI_API_KEY) — both shown the full cited
+ * passages. The cheap judge throws occasional 0.00 outliers on clearly-grounded
+ * answers, so the Claude judge is the one to trust; the harness flags the gap.
  *
  * The point: every retrieval/answer claim in the case study is a number you can
  * reproduce here, not an assertion. Exits non-zero if recall regresses below the
@@ -17,7 +23,8 @@ import corpusData from "@/data/corpus.json";
 import type { Passage } from "@/lib/rag/types";
 import { BM25, type Ranked } from "@/lib/rag/bm25";
 import { embedQuery, denseRank, hasEmbeddingIndex } from "@/lib/rag/embeddings";
-import { reciprocalRankFusion } from "@/lib/rag/rrf";
+import { reciprocalRankFusion, capPerSource } from "@/lib/rag/rrf";
+import { sourceKey } from "@/lib/rag/corpus";
 import { generateAnswer } from "@/lib/rag/generate";
 
 type GoldenItem = { question: string; relevantPassageIds: string[] };
@@ -26,10 +33,22 @@ const K = 5;
 const CAND = 40; // candidates per retriever fed into fusion / rerank
 // Gate on the keyless lexical path (what CI runs). Hybrid/dense score higher.
 const RECALL_GATE = Number(process.env.RECALL_GATE ?? "0.80");
+// Per-source cap for the SHIPPED pipeline — matches lib/rag/corpus.ts, which is
+// measured OFF by default on this corpus (see the hybrid+sourcecap arm below).
+const SOURCE_CAP = Number(process.env.SOURCE_CAP ?? "0");
+// The ablation arm always tests a representative cap so the effect stays visible.
+const SOURCECAP_ARM = Number(process.env.SOURCECAP_ARM ?? "3");
+const GPT_JUDGE_MODEL = process.env.GPT_JUDGE_MODEL || "gpt-4o-mini";
 
 const passages = corpusData as unknown as Passage[];
 const byId = new Map(passages.map((p) => [p.id, p]));
 const bm25 = new BM25(passages.map((p) => ({ id: p.id, text: p.text })));
+
+/** Source-document key for diversity capping, matching the live pipeline. */
+const sourceOf = (id: string): string | undefined => {
+  const p = byId.get(id);
+  return p ? sourceKey(p) : undefined;
+};
 
 const golds = golden as GoldenItem[];
 const inCorpus = golds.filter((g) => g.relevantPassageIds.length > 0);
@@ -50,6 +69,53 @@ function reciprocalRank(ids: string[], relevant: Set<string>): number {
 }
 function textOf(res: Anthropic.Message): string {
   return res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+}
+
+const JUDGE_SYSTEM =
+  "You are a strict grader. Decide whether EVERY claim in the answer is supported by the sources. " +
+  'Respond with ONLY JSON: {"grounded": boolean, "score": number 0-1, "reason": string}.';
+
+/** Pull the {score} out of a judge's JSON-ish reply; 0 on any parse failure. */
+function parseScore(raw: string): number {
+  try {
+    return JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)).score ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Second, independent faithfulness judge — gpt-4o-mini via OpenAI chat
+ * completions (the same key dense retrieval already uses). Returns null if no
+ * key or on any API error, so the Claude judge always carries the headline.
+ */
+async function openaiFaithfulness(user: string): Promise<number | null> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: GPT_JUDGE_MODEL,
+        temperature: 0,
+        max_tokens: 400,
+        messages: [
+          { role: "system", content: JUDGE_SYSTEM },
+          { role: "user", content: user },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      console.error(`openai judge: ${res.status}`);
+      return null;
+    }
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    return parseScore(data.choices?.[0]?.message?.content ?? "");
+  } catch (err) {
+    console.error("openai judge failed:", err);
+    return null;
+  }
 }
 
 /** Compute lexical / dense / hybrid rankings for a query in one shot. */
@@ -108,6 +174,8 @@ type Row = { mode: string; recall: number; mrr: number };
 
 async function ablation(): Promise<number> {
   const modes = haveDense ? ["lexical", "dense", "hybrid"] : ["lexical"];
+  // Retrieval-only transform — no API key needed, so it isn't gated on haveKey.
+  if (process.env.EVAL_SOURCECAP === "1") modes.push("hybrid+sourcecap");
   if (process.env.EVAL_REWRITE === "1" && haveKey) modes.push("hybrid+rewrite");
   if (process.env.EVAL_RERANK === "1" && haveKey) modes.push("hybrid+rerank");
 
@@ -123,6 +191,11 @@ async function ablation(): Promise<number> {
       const ids = rk[m].map((x) => x.id);
       agg[m].r += recallAt(ids, rel);
       agg[m].m += reciprocalRank(ids, rel);
+    }
+    if (modes.includes("hybrid+sourcecap")) {
+      const ids = capPerSource(rk.hybrid, sourceOf, SOURCECAP_ARM).map((x) => x.id);
+      agg["hybrid+sourcecap"].r += recallAt(ids, rel);
+      agg["hybrid+sourcecap"].m += reciprocalRank(ids, rel);
     }
     if (modes.includes("hybrid+rewrite")) {
       const rq = await rewriteQuery(g.question);
@@ -181,53 +254,86 @@ async function gateExperiment() {
   console.log(`=> a threshold between the two pre-abstains before spending a generation.`);
 }
 
+/** Retrieve the shipped-pipeline sources (hybrid, then source-diversity cap). */
+function sourcesFor(rk: Record<string, Ranked[]>): Passage[] {
+  return capPerSource(rk.hybrid, sourceOf, SOURCE_CAP)
+    .slice(0, K)
+    .map((x) => byId.get(x.id)!);
+}
+
 async function faithfulness() {
   if (!client) {
     console.log("\n(Faithfulness + abstain accuracy skipped — set EVAL_FAITHFULNESS=1 and ANTHROPIC_API_KEY.)");
     return;
   }
-  const judge = process.env.JUDGE_MODEL || "claude-opus-4-8";
-  let sum = 0;
-  let counted = 0;
-  console.log(`\nFaithfulness (judge: ${judge})`);
-  console.log("-".repeat(48));
+  const claudeJudge = process.env.JUDGE_MODEL || "claude-opus-4-8";
+  const haveGpt = !!process.env.OPENAI_API_KEY;
+  let claudeSum = 0;
+  let gptSum = 0;
+  let combinedSum = 0;
+  let counted = 0; // in-corpus answers scored by Claude (the headline)
+  let gptCounted = 0;
+  let outliers = 0; // gpt scored 0 where Claude was confident — the unreliable judge
+
+  console.log(
+    `\nFaithfulness — two judges: Claude (${claudeJudge})` +
+      `${haveGpt ? ` + ${GPT_JUDGE_MODEL}` : "  (gpt judge skipped — no OPENAI_API_KEY)"}`,
+  );
+  console.log("-".repeat(64));
   for (const g of inCorpus) {
-    const rk = await rankings(g.question);
-    const sources = rk.hybrid.slice(0, K).map((x) => byId.get(x.id)!);
+    const sources = sourcesFor(await rankings(g.question));
     const ans = await generateAnswer(g.question, sources);
     if (ans.abstained) {
-      console.log(`abstained  ${g.question}`);
+      console.log(`abstained         ${g.question}`);
       continue;
     }
     const answerText = ans.segments.map((s) => s.text).join("");
     const sourcesText = sources.map((p, i) => `[${i + 1}] ${p.text}`).join("\n");
-    const res = await client.messages.create({
-      model: judge,
-      max_tokens: 400,
-      system:
-        "You are a strict grader. Decide whether EVERY claim in the answer is supported by the sources. " +
-        'Respond with ONLY JSON: {"grounded": boolean, "score": number 0-1, "reason": string}.',
-      messages: [{ role: "user", content: `SOURCES:\n${sourcesText}\n\nQUESTION: ${g.question}\nANSWER: ${answerText}` }],
-    });
-    let score = 0;
-    try {
-      const raw = textOf(res);
-      score = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)).score ?? 0;
-    } catch {
-      score = 0;
-    }
-    sum += score;
-    counted += 1;
-    console.log(`score=${score.toFixed(2)}  ${g.question}`);
-  }
-  console.log("-".repeat(48));
-  console.log(counted ? `mean faithfulness = ${(sum / counted).toFixed(3)}` : "no answers scored");
+    const user = `SOURCES:\n${sourcesText}\n\nQUESTION: ${g.question}\nANSWER: ${answerText}`;
 
-  // Abstain accuracy: out-of-corpus questions must decline.
+    const cRes = await client.messages.create({
+      model: claudeJudge,
+      max_tokens: 400,
+      system: JUDGE_SYSTEM,
+      messages: [{ role: "user", content: user }],
+    });
+    const cScore = parseScore(textOf(cRes));
+    const gScore = haveGpt ? await openaiFaithfulness(user) : null;
+
+    claudeSum += cScore;
+    counted += 1;
+    if (gScore != null) {
+      gptSum += gScore;
+      gptCounted += 1;
+      combinedSum += (cScore + gScore) / 2;
+      if (gScore === 0 && cScore >= 0.8) outliers += 1;
+    } else {
+      combinedSum += cScore;
+    }
+    const tail = haveGpt ? `claude=${cScore.toFixed(2)} gpt=${(gScore ?? NaN).toFixed(2)}` : `score=${cScore.toFixed(2)}`;
+    console.log(`${tail.padEnd(26)}${g.question}`);
+  }
+  console.log("-".repeat(64));
+  if (counted) {
+    console.log(`mean faithfulness — Claude (headline) = ${(claudeSum / counted).toFixed(3)}`);
+    if (gptCounted) {
+      console.log(`mean faithfulness — ${GPT_JUDGE_MODEL} = ${(gptSum / gptCounted).toFixed(3)}`);
+      console.log(`mean faithfulness — combined          = ${(combinedSum / counted).toFixed(3)}`);
+      if (outliers) {
+        console.log(
+          `note: ${outliers} answer(s) scored 0.00 by ${GPT_JUDGE_MODEL} but ≥0.80 by Claude — ` +
+            `the cheap judge is the unreliable one, so the Claude number is the headline.`,
+        );
+      }
+    }
+  } else {
+    console.log("no answers scored");
+  }
+
+  // Abstain accuracy: out-of-corpus questions must decline (same shipped path).
   let abstained = 0;
   for (const g of outOfCorpus) {
-    const rk = await rankings(g.question);
-    const ans = await generateAnswer(g.question, rk.hybrid.slice(0, K).map((x) => byId.get(x.id)!));
+    const ans = await generateAnswer(g.question, sourcesFor(await rankings(g.question)));
     if (ans.abstained) abstained += 1;
     console.log(`${ans.abstained ? "abstained ✓" : "ANSWERED ✗"}  ${g.question}`);
   }
