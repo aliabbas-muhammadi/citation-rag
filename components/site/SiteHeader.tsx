@@ -21,9 +21,10 @@ export function SiteHeader() {
         <nav className="flex items-center gap-0.5 sm:gap-1">
           <Link
             href="/ask"
-            className="rounded-md px-3 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
+            className="rounded-md px-2.5 py-2 text-sm text-ink-muted transition-colors hover:text-ink sm:px-3"
           >
-            Ask the corpus
+            <span className="sm:hidden">Ask</span>
+            <span className="hidden sm:inline">Ask the corpus</span>
           </Link>
           <a
             href="https://github.com/aliabbas-muhammadi/citation-rag"
@@ -32,6 +33,13 @@ export function SiteHeader() {
             className="hidden rounded-md px-3 py-2 text-sm text-ink-muted transition-colors hover:text-ink sm:inline-block"
           >
             Source
+          </a>
+          <a
+            href="https://alimuhammadi.com"
+            className="ml-0.5 inline-flex items-center gap-1 rounded-md border border-line px-2.5 py-1.5 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink sm:px-3"
+            title="Back to Ali Muhammadi's portfolio"
+          >
+            <span aria-hidden>←</span> Portfolio
           </a>
           <ThemeToggle className="ml-1" />
         </nav>
