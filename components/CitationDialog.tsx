@@ -63,11 +63,11 @@ export function CitationDialog({ passage, index, citedText, onClose }: Props) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900 sm:rounded-2xl"
+        className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-t-2xl border border-line-strong bg-paper-raised p-5 shadow-xl sm:rounded-2xl"
       >
         <div className="flex items-start justify-between gap-4">
-          <div className="text-sm">
-            <span className="font-mono text-xs text-zinc-400">[{index}]</span>{" "}
+          <div className="text-sm text-ink">
+            <span className="font-mono text-xs text-accent">[{index}]</span>{" "}
             <span className="font-medium">
               {passage.book} — {passage.section} {passage.number}
             </span>
@@ -76,19 +76,17 @@ export function CitationDialog({ passage, index, citedText, onClose }: Props) {
             ref={closeRef}
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 -mt-1 rounded-md px-2 py-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            className="-mr-1 -mt-1 rounded-md px-2 py-1 text-ink-faint transition-colors hover:bg-paper-sunken hover:text-ink"
           >
             ✕
           </button>
         </div>
 
-        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
+        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-ink-muted">
           {split ? (
             <>
               {split.before}
-              <mark className="rounded bg-amber-200 px-0.5 text-zinc-900 dark:bg-amber-300/80">
-                {split.match}
-              </mark>
+              <mark className="cite-mark">{split.match}</mark>
               {split.after}
             </>
           ) : (
@@ -97,8 +95,8 @@ export function CitationDialog({ passage, index, citedText, onClose }: Props) {
         </p>
 
         {!split && citedText.trim() && (
-          <div className="mt-3 rounded-lg border-l-2 border-amber-400 bg-amber-50 px-3 py-2 text-xs text-zinc-600 dark:bg-amber-950/40 dark:text-zinc-300">
-            <span className="font-semibold">Cited span:</span> “{citedText.trim()}”
+          <div className="mt-3 rounded-lg border-l-2 border-accent bg-accent-soft/50 px-3 py-2 text-xs text-ink-muted">
+            <span className="font-semibold text-ink">Cited span:</span> “{citedText.trim()}”
           </div>
         )}
       </div>

@@ -114,13 +114,21 @@ export default function AskPage() {
   const hasAnswer = segments.some((s) => s.text.trim().length > 0);
 
   return (
-    <main className="mx-auto max-w-3xl px-5 py-12 sm:py-16">
-      <h1 className="text-2xl font-semibold tracking-tight">Ask the corpus</h1>
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-        Citation-grounded answers over the U.S. founding documents — the
-        Constitution, the Bill of Rights, and the Federalist Papers. Every claim
-        links to the exact passage that supports it, and when the sources
-        don&apos;t contain the answer, it says so instead of guessing.
+    <main className="mx-auto max-w-3xl px-5 py-12 sm:px-8 sm:py-16">
+      <p className="eyebrow flex items-center gap-2">
+        <span className="verdigris--dot inline-block h-1.5 w-1.5">
+          <span className="block h-full w-full rounded-full bg-accent" />
+        </span>
+        Ask the corpus
+      </p>
+      <h1 className="mt-4 font-serif text-3xl text-ink sm:text-4xl">
+        Query the founding documents.
+      </h1>
+      <p className="mt-3 max-w-2xl leading-relaxed text-ink-muted">
+        Citation-grounded answers over the U.S. founding documents — the Constitution,
+        the Bill of Rights, and the Federalist Papers. Every claim links to the exact
+        passage that supports it, and when the sources don&apos;t contain the answer, it
+        says so instead of guessing.
       </p>
 
       <form
@@ -128,24 +136,24 @@ export default function AskPage() {
           e.preventDefault();
           run(question);
         }}
-        className="mt-6"
+        className="mt-7"
       >
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           rows={3}
           placeholder="Ask a question…"
-          className="w-full resize-none rounded-xl border border-zinc-300 bg-white p-3 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
+          className="w-full resize-none rounded-xl border border-line bg-paper-raised p-3.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent"
         />
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <button
             type="submit"
             disabled={streaming}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-zinc-900"
+            className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:opacity-50"
           >
-            {streaming ? "Thinking…" : "Ask"}
+            {streaming ? "Retrieving…" : "Ask"}
           </button>
-          <span className="text-xs text-zinc-500">
+          <span className="font-mono text-[0.68rem] uppercase tracking-[0.08em] text-ink-faint">
             Hybrid retrieval (BM25 + embeddings) · streamed, grounded answer
           </span>
         </div>
@@ -160,7 +168,7 @@ export default function AskPage() {
               setQuestion(ex);
               run(ex);
             }}
-            className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:border-zinc-500 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400"
+            className="rounded-full border border-line px-3 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
           >
             {ex}
           </button>
@@ -168,7 +176,7 @@ export default function AskPage() {
       </div>
 
       {error && (
-        <p className="mt-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <p className="mt-6 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-950/40 dark:text-red-300">
           {error}
         </p>
       )}
@@ -176,13 +184,16 @@ export default function AskPage() {
       {(streaming || status === "done") && !error && (
         <section className="mt-8">
           {abstained ? (
-            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              No supported answer found in the available sources. (The engine
-              abstains rather than guess.)
+            <div className="rounded-xl border border-line-strong bg-paper-raised p-5 sheen-top">
+              <p className="eyebrow">Abstained · no supported evidence</p>
+              <p className="mt-2 text-[0.95rem] leading-relaxed text-ink">
+                The record is silent. No passage in the corpus supports an answer — so the
+                engine declines rather than guess.
+              </p>
             </div>
           ) : (
             (hasAnswer || streaming) && (
-              <div className="rounded-xl border border-zinc-200 bg-white p-5 text-[0.95rem] leading-relaxed dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="rounded-xl border border-line-strong bg-paper-raised p-5 text-[0.95rem] leading-relaxed text-ink sheen-top">
                 <p>
                   {segments.map((seg, i) => (
                     <span key={i}>
@@ -205,16 +216,16 @@ export default function AskPage() {
                                 })
                               }
                               aria-label={`View source ${c.sourceIndex} in context`}
-                              className="inline-flex translate-y-[-2px] items-center rounded bg-zinc-200 px-1 text-[0.65rem] font-medium text-zinc-700 hover:bg-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+                              className="inline-flex translate-y-[-2px] items-center rounded-[3px] border-b border-accent/50 bg-accent-soft px-1 font-mono text-[0.62rem] font-medium text-accent-strong transition-colors hover:bg-accent/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                             >
                               {c.sourceIndex}
                             </button>
                             {p && (
-                              <span className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1 hidden w-64 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-2.5 text-left text-xs opacity-0 shadow-lg transition-opacity group-hover/cite:opacity-100 group-focus-within/cite:opacity-100 dark:border-zinc-700 dark:bg-zinc-800 sm:block">
-                                <span className="block font-medium text-zinc-700 dark:text-zinc-200">
+                              <span className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1 hidden w-64 -translate-x-1/2 rounded-lg border border-line bg-paper-raised p-2.5 text-left text-xs opacity-0 shadow-lg transition-opacity group-hover/cite:opacity-100 group-focus-within/cite:opacity-100 sheen-top sm:block">
+                                <span className="block font-medium text-ink">
                                   [{c.sourceIndex}] {p.book} — {p.section}
                                 </span>
-                                <span className="mt-1 line-clamp-3 block text-zinc-500 dark:text-zinc-400">
+                                <span className="mt-1 line-clamp-3 block text-ink-muted">
                                   {c.citedText}
                                 </span>
                               </span>
@@ -225,7 +236,7 @@ export default function AskPage() {
                     </span>
                   ))}
                   {streaming && (
-                    <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-zinc-400 align-middle" />
+                    <span className="ml-0.5 inline-block h-4 w-px translate-y-[2px] bg-accent/70 align-middle" />
                   )}
                 </p>
               </div>
@@ -234,23 +245,21 @@ export default function AskPage() {
 
           {sources.length > 0 && (
             <>
-              <h2 className="mt-8 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                Sources
-              </h2>
+              <h2 className="eyebrow mt-8">Sources</h2>
               <ol className="mt-3 space-y-3">
                 {sources.map((p, i) => (
                   <li
                     key={p.id}
                     id={`source-${i + 1}`}
-                    className="scroll-mt-20 rounded-lg border border-zinc-200 p-4 text-sm target:border-zinc-500 dark:border-zinc-800"
+                    className="scroll-mt-20 rounded-lg border border-line p-4 text-sm transition-colors target:border-accent"
                   >
                     <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-xs text-zinc-400">[{i + 1}]</span>
-                      <span className="font-medium">
+                      <span className="font-mono text-xs text-accent">[{i + 1}]</span>
+                      <span className="font-medium text-ink">
                         {p.book} — {p.section} {p.number}
                       </span>
                     </div>
-                    <p className="mt-1 text-zinc-600 dark:text-zinc-400">{p.text}</p>
+                    <p className="mt-1 leading-relaxed text-ink-muted">{p.text}</p>
                   </li>
                 ))}
               </ol>
@@ -259,9 +268,7 @@ export default function AskPage() {
 
           {suggestions.length > 0 && (
             <div className="mt-8">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                Follow-up questions
-              </h2>
+              <h2 className="eyebrow">Follow-up questions</h2>
               <div className="mt-3 flex flex-wrap gap-2">
                 {suggestions.map((s) => (
                   <button
@@ -271,7 +278,7 @@ export default function AskPage() {
                       setQuestion(s);
                       run(s);
                     }}
-                    className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:border-zinc-500 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400"
+                    className="rounded-full border border-line px-3 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
                   >
                     {s}
                   </button>
@@ -281,7 +288,7 @@ export default function AskPage() {
           )}
 
           {meta.model && (
-            <p className="mt-6 text-xs text-zinc-400">
+            <p className="mt-6 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-ink-faint">
               Model: {meta.model}
               {meta.usage
                 ? ` · ${meta.usage.inputTokens} in / ${meta.usage.outputTokens} out tokens`
