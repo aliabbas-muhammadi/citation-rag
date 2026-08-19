@@ -7,6 +7,25 @@ import { CitationDialog } from "@/components/CitationDialog";
 type Segment = { text: string; citations: Citation[] };
 type Meta = { model?: string; usage?: { inputTokens: number; outputTokens: number } };
 type ActiveCitation = { passage: Passage; index: number; citedText: string };
+type VerifyResult = { label: "supported" | "partial" | "unsupported"; score: number };
+
+const VERIFY_STYLES: Record<VerifyResult["label"], string> = {
+  supported: "border-emerald-600/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  partial: "border-amber-600/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  unsupported: "border-red-600/40 bg-red-500/10 text-red-700 dark:text-red-300",
+};
+
+/** Per-claim citation-verification pill: does the cited span actually support the claim? */
+function VerifyBadge({ result }: { result: VerifyResult }) {
+  return (
+    <span
+      title={`Cited span ${result.label} the claim (verifier score ${result.score.toFixed(2)})`}
+      className={`ml-1 inline-flex translate-y-[-2px] items-center rounded-[3px] border px-1 align-middle font-mono text-[0.62rem] font-medium ${VERIFY_STYLES[result.label]}`}
+    >
+      {result.label}
+    </span>
+  );
+}
 
 const EXAMPLES = [
   "What does the First Amendment protect?",
@@ -26,6 +45,10 @@ export default function AskPage() {
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [active, setActive] = useState<ActiveCitation | null>(null);
+  const [verifyLabels, setVerifyLabels] = useState<(VerifyResult | null)[]>([]);
+  const [verifyStatus, setVerifyStatus] = useState<"idle" | "loading" | "done">("idle");
+  const [verifyBackend, setVerifyBackend] = useState("");
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const busy = useRef(false);
 
   async function run(q: string) {
@@ -41,6 +64,10 @@ export default function AskPage() {
     setMeta({});
     setSuggestions([]);
     setActive(null);
+    setVerifyLabels([]);
+    setVerifyStatus("idle");
+    setVerifyBackend("");
+    setVerifyError(null);
 
     const segs: Segment[] = [];
     const flush = () =>
@@ -107,6 +134,36 @@ export default function AskPage() {
     } finally {
       setStatus("done");
       busy.current = false;
+    }
+  }
+
+  // Verify citations on demand (off the answer's critical path): checks each
+  // cited span actually entails its claim, then annotates the answer.
+  async function verify() {
+    if (verifyStatus === "loading") return;
+    setVerifyStatus("loading");
+    setVerifyError(null);
+    try {
+      const statements = segments.map((s) => ({
+        text: s.text,
+        evidences: s.citations.map((c) => c.citedText),
+      }));
+      const res = await fetch("/api/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ statements }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(data.labels)) {
+        setVerifyLabels(data.labels);
+        setVerifyBackend(typeof data.backend === "string" ? data.backend : "");
+      } else {
+        setVerifyError(typeof data.error === "string" ? data.error : "verification failed — try again");
+      }
+    } catch {
+      setVerifyError("verification failed — try again");
+    } finally {
+      setVerifyStatus("done");
     }
   }
 
@@ -233,6 +290,7 @@ export default function AskPage() {
                           </span>
                         );
                       })}
+                      {verifyLabels[i] ? <VerifyBadge result={verifyLabels[i]!} /> : null}
                     </span>
                   ))}
                   {streaming && (
@@ -241,6 +299,31 @@ export default function AskPage() {
                 </p>
               </div>
             )
+          )}
+
+          {status === "done" && hasAnswer && !abstained && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={verify}
+                disabled={verifyStatus === "loading"}
+                className="rounded-full border border-line px-3 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+              >
+                {verifyStatus === "loading"
+                  ? "Verifying citations…"
+                  : verifyStatus === "done"
+                    ? "Re-verify citations"
+                    : "Verify citations"}
+              </button>
+              {verifyStatus === "done" && verifyBackend && !verifyError && (
+                <span className="font-mono text-[0.62rem] text-ink-faint">
+                  each cited span checked for entailment · verifier: {verifyBackend}
+                </span>
+              )}
+              {verifyError && (
+                <span className="text-[0.72rem] text-red-600 dark:text-red-400">{verifyError}</span>
+              )}
+            </div>
           )}
 
           {sources.length > 0 && (
