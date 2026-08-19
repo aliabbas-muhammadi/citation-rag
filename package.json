@@ -9,7 +9,8 @@
     "lint": "eslint",
     "build:corpus": "tsx scripts/build-corpus.ts",
     "embed": "tsx scripts/embed-corpus.ts",
-    "eval": "tsx eval/run.ts"
+    "eval": "tsx eval/run.ts",
+    "verify:check": "tsx eval/verify.check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",
