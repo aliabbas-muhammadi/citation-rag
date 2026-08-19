@@ -1,0 +1,80 @@
+[
+  {
+    "claim": "Congress consists of two chambers: the Senate and the House of Representatives.",
+    "evidence": "All legislative Powers herein granted shall be vested in a Congress of the United States, which shall consist of a Senate and House of Representatives.",
+    "gold": "supported"
+  },
+  {
+    "claim": "Each state has two senators.",
+    "evidence": "The Senate of the United States shall be composed of two Senators from each State, chosen by the legislature thereof, for six Years; and each Senator shall have one Vote.",
+    "gold": "supported"
+  },
+  {
+    "claim": "Senators serve six-year terms.",
+    "evidence": "The Senate of the United States shall be composed of two Senators from each State, chosen by the legislature thereof, for six Years; and each Senator shall have one Vote.",
+    "gold": "supported"
+  },
+  {
+    "claim": "Members of the House of Representatives are elected every two years.",
+    "evidence": "The House of Representatives shall be composed of Members chosen every second Year by the People of the several States.",
+    "gold": "supported"
+  },
+  {
+    "claim": "A stated purpose of the Constitution is to provide for the common defense.",
+    "evidence": "We the people of the United States, in Order to form a more perfect Union, establish Justice, insure domestic Tranquility, provide for the common defence, promote the general Welfare, and secure the Blessings of Liberty to ourselves and our Posterity, do ordain and establish this Constitution.",
+    "gold": "supported"
+  },
+  {
+    "claim": "Every senator has a single vote.",
+    "evidence": "each Senator shall have one Vote.",
+    "gold": "supported"
+  },
+  {
+    "claim": "The qualifications to vote for Representatives match those for the larger house of the state legislature.",
+    "evidence": "the electors in each State shall have the qualifications requisite for electors of the most numerous branch of the State legislature.",
+    "gold": "supported",
+    "note": "archaic phrasing — 'most numerous branch' = larger legislative house"
+  },
+  {
+    "claim": "Senators serve four-year terms.",
+    "evidence": "The Senate of the United States shall be composed of two Senators from each State, chosen by the legislature thereof, for six Years; and each Senator shall have one Vote.",
+    "gold": "unsupported",
+    "note": "contradiction: six years, not four"
+  },
+  {
+    "claim": "Representatives are chosen by the state legislatures.",
+    "evidence": "The House of Representatives shall be composed of Members chosen every second Year by the People of the several States.",
+    "gold": "unsupported",
+    "note": "contradiction: chosen by the People, not the legislatures"
+  },
+  {
+    "claim": "The President has the power to declare war.",
+    "evidence": "All legislative Powers herein granted shall be vested in a Congress of the United States, which shall consist of a Senate and House of Representatives.",
+    "gold": "unsupported",
+    "note": "unrelated: evidence does not mention the President or war"
+  },
+  {
+    "claim": "The Vice President casts a tie-breaking vote in the Senate.",
+    "evidence": "each Senator shall have one Vote.",
+    "gold": "unsupported",
+    "note": "not stated in this span"
+  },
+  {
+    "claim": "Senators are elected directly by the people for six-year terms.",
+    "evidence": "The Senate of the United States shall be composed of two Senators from each State, chosen by the legislature thereof, for six Years.",
+    "gold": "unsupported",
+    "note": "trap: 'chosen by the legislature thereof' contradicts 'directly by the people' (pre-17th-Amendment text)"
+  },
+  {
+    "claim": "The original Constitution abolishes slavery.",
+    "evidence": "We the people of the United States, in Order to form a more perfect Union, establish Justice, insure domestic Tranquility, provide for the common defence, promote the general Welfare, and secure the Blessings of Liberty.",
+    "gold": "unsupported",
+    "note": "not stated; and false of the original text"
+  },
+  {
+    "claim": "Each state sends two members to the House of Representatives.",
+    "evidence": "The House of Representatives shall be composed of Members chosen every second Year by the People of the several States.",
+    "gold": "unsupported",
+    "note": "House apportionment is by population, not two per state; not entailed by this span"
+  }
+]

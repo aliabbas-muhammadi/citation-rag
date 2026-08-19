@@ -30,6 +30,12 @@ Most "chat with your docs" demos stuff chunks into a prompt and hope. This one:
 - **Is measured, not asserted.** An eval harness scores retrieval (recall@k, MRR)
   and answer faithfulness (two independent LLM judges), and gates CI so changes
   are provable.
+- **Verifies the citations, not just the answer.** Native citations prove a span
+  *exists* in the source; they don't prove it *entails* the claim. An independent
+  entailment verifier checks each cited span against its claim and reports **ALCE
+  citation precision/recall** — and, because the verifier is itself fallible on
+  18th-century prose, it first measures *its own* accuracy and Cohen's κ against a
+  human-labeled slice, so the citation numbers carry their own reliability.
 
 ## Architecture
 
@@ -95,9 +101,12 @@ npm install
 npm run dev            # http://localhost:3000  → "Try the demo" → /ask
 npm run eval           # retrieval ablation + recall gate, offline (no key)
 
+npm run verify:check  # deterministic self-check of the citation-metric math (no key)
+
 # full pipeline + generation experiments:
 cp .env.example .env.local        # add OPENAI_API_KEY and ANTHROPIC_API_KEY
 EVAL_REWRITE=1 EVAL_RERANK=1 EVAL_FAITHFULNESS=1 npm run eval
+EVAL_CITATION=1 npm run eval      # citation precision/recall + verifier reliability (κ)
 
 # regenerate the corpus / embedding index (output is committed):
 npm run build:corpus

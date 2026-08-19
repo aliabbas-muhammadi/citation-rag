@@ -26,6 +26,9 @@ import { embedQuery, denseRank, hasEmbeddingIndex } from "@/lib/rag/embeddings";
 import { reciprocalRankFusion, capPerSource } from "@/lib/rag/rrf";
 import { sourceKey } from "@/lib/rag/corpus";
 import { generateAnswer } from "@/lib/rag/generate";
+import { scoreCitations, measureVerifier, type CitationScore, type LabeledPair } from "@/lib/rag/verify";
+import { claudeEntailer } from "./entail";
+import citationLabels from "./citation-labels.json";
 
 type GoldenItem = { question: string; relevantPassageIds: string[] };
 
@@ -340,6 +343,69 @@ async function faithfulness() {
   console.log(`abstain accuracy (out-of-corpus) = ${abstained}/${outOfCorpus.length}`);
 }
 
+/**
+ * Citation verification — ALCE citation precision/recall over the in-corpus
+ * answers, using an independent entailment verifier. First measures the verifier
+ * itself against a human-labeled slice (accuracy + kappa) so the citation numbers
+ * carry their own reliability, then scores each answer.
+ */
+async function citationVerification() {
+  if (!client) {
+    console.log("\n(Citation verification skipped — set EVAL_CITATION=1 and ANTHROPIC_API_KEY.)");
+    return;
+  }
+  const model = process.env.JUDGE_MODEL || "claude-opus-4-8";
+  const verify = claudeEntailer(client, model);
+
+  console.log("\nCitation verification — ALCE precision/recall (verifier: Claude " + model + ")");
+  console.log("-".repeat(64));
+
+  // Step 1 — measure the verifier against the human-labeled founding-docs slice.
+  const rel = await measureVerifier(citationLabels as LabeledPair[], verify);
+  console.log(
+    `verifier reliability on ${rel.n} human-labeled pairs: ` +
+      `accuracy=${rel.accuracy.toFixed(3)}  kappa=${rel.kappa.toFixed(3)}`,
+  );
+  if (rel.kappa < 0.6) {
+    console.log("note: verifier kappa < 0.60 (archaic-English domain shift?) — treat citation numbers as directional.");
+  }
+
+  // Step 2 — citation precision/recall over the in-corpus answers.
+  let pSum = 0;
+  let rSum = 0;
+  let answered = 0;
+  let uncited = 0;
+  let cites = 0;
+  for (const g of inCorpus) {
+    const ans = await generateAnswer(g.question, sourcesFor(await rankings(g.question)));
+    if (ans.abstained) {
+      console.log(`abstained                 ${g.question}`);
+      continue;
+    }
+    const s: CitationScore = await scoreCitations(ans, verify);
+    if (s.nStatements === 0) continue;
+    pSum += s.precision;
+    rSum += s.recall;
+    answered += 1;
+    uncited += s.nUncited;
+    cites += s.nCitations;
+    console.log(
+      `prec=${s.precision.toFixed(2)} rec=${s.recall.toFixed(2)} cites=${s.nCitations} uncited=${s.nUncited}  ${g.question}`,
+    );
+  }
+  console.log("-".repeat(64));
+  if (answered) {
+    console.log(`mean citation precision = ${(pSum / answered).toFixed(3)}`);
+    console.log(
+      `mean citation recall    = ${(rSum / answered).toFixed(3)}   ` +
+        `(${cites} citations across ${answered} answers, ${uncited} uncited substantive statements)`,
+    );
+    console.log(`verifier kappa vs humans = ${rel.kappa.toFixed(3)} — the citation numbers are only as trustworthy as this.`);
+  } else {
+    console.log("no answers scored");
+  }
+}
+
 async function main() {
   console.log(
     `Modes available: lexical${haveDense ? " + dense + hybrid" : " only (no OPENAI_API_KEY)"}` +
@@ -348,6 +414,7 @@ async function main() {
   const recall = await ablation();
   await gateExperiment();
   if (process.env.EVAL_FAITHFULNESS === "1") await faithfulness();
+  if (process.env.EVAL_CITATION === "1") await citationVerification();
 
   console.log(`\nGate: recall ${recall.toFixed(3)} vs threshold ${RECALL_GATE}`);
   if (recall < RECALL_GATE) {
