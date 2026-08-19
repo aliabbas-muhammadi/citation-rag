@@ -20,7 +20,7 @@ function VerifyBadge({ result }: { result: VerifyResult }) {
   return (
     <span
       title={`Cited span ${result.label} the claim (verifier score ${result.score.toFixed(2)})`}
-      className={`ml-1 inline-flex translate-y-[-2px] items-center rounded-[3px] border px-1 align-middle font-mono text-[0.58rem] font-medium ${VERIFY_STYLES[result.label]}`}
+      className={`ml-1 inline-flex translate-y-[-2px] items-center rounded-[3px] border px-1 align-middle font-mono text-[0.62rem] font-medium ${VERIFY_STYLES[result.label]}`}
     >
       {result.label}
     </span>
@@ -48,6 +48,7 @@ export default function AskPage() {
   const [verifyLabels, setVerifyLabels] = useState<(VerifyResult | null)[]>([]);
   const [verifyStatus, setVerifyStatus] = useState<"idle" | "loading" | "done">("idle");
   const [verifyBackend, setVerifyBackend] = useState("");
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const busy = useRef(false);
 
   async function run(q: string) {
@@ -66,6 +67,7 @@ export default function AskPage() {
     setVerifyLabels([]);
     setVerifyStatus("idle");
     setVerifyBackend("");
+    setVerifyError(null);
 
     const segs: Segment[] = [];
     const flush = () =>
@@ -140,6 +142,7 @@ export default function AskPage() {
   async function verify() {
     if (verifyStatus === "loading") return;
     setVerifyStatus("loading");
+    setVerifyError(null);
     try {
       const statements = segments.map((s) => ({
         text: s.text,
@@ -154,9 +157,11 @@ export default function AskPage() {
       if (res.ok && Array.isArray(data.labels)) {
         setVerifyLabels(data.labels);
         setVerifyBackend(typeof data.backend === "string" ? data.backend : "");
+      } else {
+        setVerifyError(typeof data.error === "string" ? data.error : "verification failed — try again");
       }
     } catch {
-      // leave labels empty; the button can be retried
+      setVerifyError("verification failed — try again");
     } finally {
       setVerifyStatus("done");
     }
@@ -310,10 +315,13 @@ export default function AskPage() {
                     ? "Re-verify citations"
                     : "Verify citations"}
               </button>
-              {verifyStatus === "done" && verifyBackend && (
+              {verifyStatus === "done" && verifyBackend && !verifyError && (
                 <span className="font-mono text-[0.62rem] text-ink-faint">
                   each cited span checked for entailment · verifier: {verifyBackend}
                 </span>
+              )}
+              {verifyError && (
+                <span className="text-[0.72rem] text-red-600 dark:text-red-400">{verifyError}</span>
               )}
             </div>
           )}

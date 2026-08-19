@@ -39,15 +39,19 @@ export function parseEntailment(raw: string): EntailmentResult {
   }
 }
 
-/** Claude entailment verifier (headline). Needs ANTHROPIC_API_KEY (client passed in). */
-export function claudeEntailer(client: Anthropic, model: string): Entailer {
+/** Claude entailment verifier. Needs ANTHROPIC_API_KEY (client passed in). Pass a
+ * signal to abort the in-flight call if the caller (e.g. a disconnected client) goes away. */
+export function claudeEntailer(client: Anthropic, model: string, signal?: AbortSignal): Entailer {
   return async (claim, evidence) => {
-    const res = await client.messages.create({
-      model,
-      max_tokens: 200,
-      system: SYSTEM,
-      messages: [{ role: "user", content: userMsg(claim, evidence) }],
-    });
+    const res = await client.messages.create(
+      {
+        model,
+        max_tokens: 200,
+        system: SYSTEM,
+        messages: [{ role: "user", content: userMsg(claim, evidence) }],
+      },
+      signal ? { signal } : undefined,
+    );
     const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
     return parseEntailment(text);
   };
@@ -111,12 +115,17 @@ export const offlineEntailer: Entailer = async (claim, evidence) => {
   return { label, score: Number(overlap.toFixed(2)) };
 };
 
-/** Pick the best available verifier: Claude if keyed, else the offline stand-in. */
-export function defaultEntailer(): { entail: Entailer; backend: string } {
+/**
+ * Pick the best available verifier: Claude if keyed, else the offline stand-in.
+ * Defaults to a small, fast model — entailment is a classification task, so the
+ * opus tier the eval harness uses for the measured metric is overkill (and costly)
+ * for the interactive per-claim badge. Override with VERIFY_MODEL.
+ */
+export function defaultEntailer(signal?: AbortSignal): { entail: Entailer; backend: string } {
   if (process.env.ANTHROPIC_API_KEY) {
     const client = new Anthropic();
-    const model = process.env.VERIFY_MODEL || "claude-opus-4-8";
-    return { entail: claudeEntailer(client, model), backend: `claude:${model}` };
+    const model = process.env.VERIFY_MODEL || "claude-haiku-4-5-20251001";
+    return { entail: claudeEntailer(client, model, signal), backend: `claude:${model}` };
   }
   return { entail: offlineEntailer, backend: "offline (lexical stand-in — no API key)" };
 }

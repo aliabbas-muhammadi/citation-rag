@@ -3,27 +3,38 @@ import type { EntailmentResult } from "@/lib/rag/verify";
 
 // Node runtime: the Anthropic SDK isn't edge-compatible.
 export const runtime = "nodejs";
+// Bound wall-clock: this fans out to sequential LLM calls; cap the function so a
+// pathological answer can't run unbounded.
+export const maxDuration = 60;
 
-const MAX_STATEMENTS = 40;
+// Bound untrusted input: this endpoint fans out to one paid LLM call per *cited*
+// statement, so cap the count and the text size per field to cap cost/abuse.
+const MAX_STATEMENTS = 25;
+const MAX_EVIDENCES = 8;
+const MAX_TEXT_LEN = 2000;
+const MAX_EVIDENCE_LEN = 3000;
+// Rate limit is charged per LLM call (cited statement), not per request, since one
+// request can trigger many — so the true cost, not the request count, is bounded.
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = 10; // requests per IP per window
+const RATE_MAX_CALLS = 30; // verifier calls per IP per window
 
-const hits = new Map<string, number[]>();
+const hits = new Map<string, { t: number; n: number }[]>();
 
 function clientIp(req: Request): string {
   const xff = req.headers.get("x-forwarded-for");
   return xff ? xff.split(",")[0]!.trim() : "unknown";
 }
 
-function rateLimited(ip: string): boolean {
+/** Token-bucket by LLM-call count over the window. Charges `calls` up front. */
+function rateLimited(ip: string, calls: number): boolean {
   const now = Date.now();
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-  recent.push(now);
+  const recent = (hits.get(ip) ?? []).filter((e) => now - e.t < RATE_WINDOW_MS);
+  recent.push({ t: now, n: calls });
   hits.set(ip, recent);
   if (hits.size > 5000) {
-    for (const [k, v] of hits) if (v.every((t) => now - t >= RATE_WINDOW_MS)) hits.delete(k);
+    for (const [k, v] of hits) if (v.every((e) => now - e.t >= RATE_WINDOW_MS)) hits.delete(k);
   }
-  return recent.length > RATE_MAX;
+  return recent.reduce((s, e) => s + e.n, 0) > RATE_MAX_CALLS;
 }
 
 const json = (body: unknown, status: number) =>
@@ -38,10 +49,6 @@ type Statement = { text: string; evidences: string[] };
  * Runs off the answer's critical path — the UI calls this on demand.
  */
 export async function POST(req: Request) {
-  if (rateLimited(clientIp(req))) {
-    return json({ error: "Rate limit exceeded — try again in a moment." }, 429);
-  }
-
   let statements: Statement[] = [];
   try {
     const body = (await req.json()) as { statements?: unknown };
@@ -50,9 +57,12 @@ export async function POST(req: Request) {
         .slice(0, MAX_STATEMENTS)
         .map((s) => s as Statement)
         .map((s) => ({
-          text: typeof s?.text === "string" ? s.text : "",
+          text: (typeof s?.text === "string" ? s.text : "").slice(0, MAX_TEXT_LEN),
           evidences: Array.isArray(s?.evidences)
-            ? s.evidences.filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+            ? s.evidences
+                .filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+                .slice(0, MAX_EVIDENCES)
+                .map((e) => e.slice(0, MAX_EVIDENCE_LEN))
             : [],
         }));
     }
@@ -61,9 +71,17 @@ export async function POST(req: Request) {
   }
   if (statements.length === 0) return json({ error: "statements are required" }, 400);
 
-  const { entail, backend } = defaultEntailer();
+  // Charge the rate limiter by the number of LLM calls this request will make.
+  const calls = statements.filter((s) => s.evidences.length > 0).length;
+  if (rateLimited(clientIp(req), Math.max(1, calls))) {
+    return json({ error: "Rate limit exceeded — try again in a moment." }, 429);
+  }
+
+  const { entail, backend } = defaultEntailer(req.signal);
   const labels: (EntailmentResult | null)[] = [];
   for (const s of statements) {
+    // Stop spending on paid calls if the client has already disconnected.
+    if (req.signal.aborted) break;
     if (s.evidences.length === 0) {
       labels.push(null);
       continue;
