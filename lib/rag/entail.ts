@@ -1,16 +1,17 @@
 /**
- * Entailment verifiers for citation checking. Two independent backends — the same
- * "two judges" design the faithfulness arm uses — so we can report their agreement
- * and never trust a single fallible verifier.
+ * Entailment verifiers for citation checking — used by both the eval harness and
+ * the runtime "verify citations" endpoint. Two LLM backends (the "two judges"
+ * design) plus a deterministic offline stand-in so the feature works keyless,
+ * exactly like the offline answer path.
  *
- * These are LLM-backed (they reuse the keys already in play). The research-preferred
- * production verifier is a purpose-built NLI model (e.g. MiniCheck-FT5, 770M,
- * ~GPT-4 accuracy at ~400x lower cost): implement the same `Entailer` interface with
- * a small Python sidecar and it drops in unchanged. Whatever the backend, its own
- * reliability is measured against the human-labeled slice (see `measureVerifier`).
+ * The research-preferred production verifier is a purpose-built NLI model (e.g.
+ * MiniCheck-FT5, 770M, ~GPT-4 accuracy at ~400x lower cost): implement the same
+ * `Entailer` interface with a small Python sidecar and it drops in unchanged.
+ * Whatever the backend, its reliability is measured against a human-labeled slice
+ * (see `measureVerifier` in ./verify).
  */
-import type Anthropic from "@anthropic-ai/sdk";
-import type { Entailer, EntailmentLabel, EntailmentResult } from "@/lib/rag/verify";
+import Anthropic from "@anthropic-ai/sdk";
+import type { Entailer, EntailmentLabel, EntailmentResult } from "./verify";
 
 const SYSTEM =
   "You are a strict natural-language-inference verifier for a citation checker. " +
@@ -82,4 +83,40 @@ export function openaiEntailer(model: string): Entailer {
       return { label: "unsupported", score: 0 };
     }
   };
+}
+
+const STOP = new Set([
+  "that", "this", "with", "from", "have", "shall", "which", "their", "there",
+  "these", "those", "been", "were", "will", "would", "such", "into", "upon", "each",
+]);
+
+const contentWords = (s: string): string[] =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !STOP.has(w));
+
+/**
+ * Deterministic offline verifier — token overlap between claim and evidence. A
+ * lexical stand-in (NOT real entailment) for the keyless demo, mirroring the
+ * offline answer path; the LLM/NLI verifier is used whenever a key is present.
+ */
+export const offlineEntailer: Entailer = async (claim, evidence) => {
+  const claimWords = contentWords(claim);
+  if (claimWords.length === 0) return { label: "unsupported", score: 0 };
+  const ev = new Set(contentWords(evidence));
+  const overlap = claimWords.filter((w) => ev.has(w)).length / claimWords.length;
+  const label: EntailmentLabel = overlap >= 0.6 ? "supported" : overlap >= 0.3 ? "partial" : "unsupported";
+  return { label, score: Number(overlap.toFixed(2)) };
+};
+
+/** Pick the best available verifier: Claude if keyed, else the offline stand-in. */
+export function defaultEntailer(): { entail: Entailer; backend: string } {
+  if (process.env.ANTHROPIC_API_KEY) {
+    const client = new Anthropic();
+    const model = process.env.VERIFY_MODEL || "claude-opus-4-8";
+    return { entail: claudeEntailer(client, model), backend: `claude:${model}` };
+  }
+  return { entail: offlineEntailer, backend: "offline (lexical stand-in — no API key)" };
 }

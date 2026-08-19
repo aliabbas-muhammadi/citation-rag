@@ -27,7 +27,7 @@ import { reciprocalRankFusion, capPerSource } from "@/lib/rag/rrf";
 import { sourceKey } from "@/lib/rag/corpus";
 import { generateAnswer } from "@/lib/rag/generate";
 import { scoreCitations, measureVerifier, type CitationScore, type LabeledPair } from "@/lib/rag/verify";
-import { claudeEntailer } from "./entail";
+import { claudeEntailer } from "@/lib/rag/entail";
 import citationLabels from "./citation-labels.json";
 
 type GoldenItem = { question: string; relevantPassageIds: string[] };
