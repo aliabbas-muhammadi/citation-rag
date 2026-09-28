@@ -4,7 +4,7 @@ import { BM25, type Ranked } from "./bm25";
 import { embedQuery, denseRank, hasEmbeddingIndex } from "./embeddings";
 import { reciprocalRankFusion, capPerSource } from "./rrf";
 
-/** A pluggable source of passages. Swap the in-process index for a real DB in production. */
+/** A pluggable source of passages. Swap the in-processs index for a real DB in production. */
 export interface Corpus {
   search(query: string, k: number): Promise<RetrievedChunk[]>;
 }
